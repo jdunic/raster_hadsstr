@@ -230,6 +230,7 @@ total_avg4
 
 ```
 
+getSSTAvgOverYears2() was the fastest calculation of average time over years. It is just an expansion of the original getSSTAnnualRasters() function without an apply to break up all the different years into their own rasters.
 
 # Jarrett
 identical(as.vector(sstData$sstArray[, , 1]), values(b1))
