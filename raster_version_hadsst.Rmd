@@ -237,55 +237,35 @@ identical(as.vector(sstData$sstArray[, , 1]), values(b1))
 
 head(as.vector(sstData$sstArray[, , 1]))
 
-head(values(b1))
+Let's move onto the linear change data.
 
-# Jillian
-b1 <- subset(b, 1)
-min(values(b1), na.rm = T)
-# should be -1.8
 ```{r}
-
-b <- loadHadSST1(directory = 'Data/', hadsstFilename = 'HadISST_sst.nc')
-
-b1 <- subset(b, 1)
-
-
-z <- raster()
-
-# get raster indices for which the year is 2011
-# we can use the fact that the year indices correspond to the band number
-getSSTAnnual <- function(sstObj, years = 1969:2011) {
-    apply(matrix(years), 1, function(x) {
-        yearIDx <- which(chron::years(sstObj@z$Date) == x)
-        subset_x <- subset(sstObj, yearIDx) 
-        means <- raster::calc(subset_x, mean, na.rm = TRUE)
-        return(means)
-    })
-}
-
-#sstObj, must be given as list index - need to figure this shit out
-getLatLong <- function(sstObj, data, lat, lon, measure = NA) {
-    coordinates(data) <- ~lon + lat
-    extract(sstObj, data)
-}
-
-fl_combined2 <- read.csv('Data/full_data_with_impacts20150330.csv')
-coordinates(fl_combined2) <- ~fl_combined2$Long.y+fl_combined2$Lat.y
-coordinates(fl_combined2) = ~Long.y + Lat.y
-
-extract(mean_ssts[[1]], fl_combined2)
-
-mean_ssts <- getSSTAnnual(b, years = 2014)
+# Using Jarrett's package
+start_lin1 <- proc.time()
+linChangeMat <- getSSTLinearChangeMat(sstObj = sstData, years = 2000:2011)
+total_lin1 <- proc.time() - start_lin1
 beep()
 
-start1 <- Sys.time()
-mean_SSTs <- getSSTAnnual(z, years = 2014)
-total1 <- Sys.time() - start1
+# New raster function - possibly room to clean this up.
+getSSTLinChangeRaster <- function(hadsst_raster = b, years = 2000:2011) {
+    annual_rasters <- getSSTAnnualRasters(hadsst_raster, years)
+    annual_rasters_brick <- brick(annual_rasters)
 
-start2 <- Sys.time()
-mean_SSTArray <- getSSTAnnualArray(sstData, years = 2014)
-total2 <- Sys.time() - start2
+    time_ <- I(years - mean(years))
+    fun <- function(x) { 
+        if (sum(is.na(x)) < length(x)) {
+        slope <- 10 * lm(x ~ time_)$coefficients[2]
+        return(slope)
+        }
+        return(NA)
+    }
+    x2 <- calc(annual_rasters_brick, fun)
+    return(x2)
+}
 
+start_lin2 <- proc.time()
+lin_change_rast <- getSSTLinChangeRaster(hadsst_raster = b, years = 2000:2011)
+total_lin2 <- proc.time() - start_lin2
 beep()
 c(total1, total2)
 
@@ -299,45 +279,19 @@ apply(matrix(2000:2011), 1, function(x) {
 total1 <- Sys.time() - start1
 
 
-subset_x <- which(chron::years(z@z$Date) == 2000:2011)
-x_2011 <- subset(z, subset_x)
-test_means <- stackApply(x_2011, subset_x, mean, na.rm=TRUE)
-total1 <-  Sys.time() - start1
+# Time comparisons
+total_lin1
+total_lin2
+```
 
-    
+Now for a little bit of testing and value checking.
 
+```{r}
+min(linChangeMat, na.rm = T) == lin_change_rast@data@min
+max(linChangeMat, na.rm = T) == lin_change_rast@data@max
+```
 
-get_test_annual raster
-
-f <- 'Data/HadISST_sst.nc'
-b <- brick(f, lvar=4)
-
-z <- raster::brick('Data/HadISST_sst.nc')
-
-x1 <- raster::raster(z, band = 1)
-
-us <- unstack(z)
-
-getSSTAnnualArray <- function(sstObj, years=1969:2009){
-  #Calculate an annual Average temperature map
-  li <- length(sstObj$lat)
-  lj <- length(sstObj$lon)
-  sstAnnualArray <- array(NA, c(lj,li, length(years)))
-  for(y in years){
-    #which pieces of the SST array do we want?
-    idx <- grep(y,sstObj$tdates)
-    #extract a subset of the big data set
-    yearSST <- sstObj$sstArray[,,idx]
-    #average each lat/long per year and fill in the right place in b
-    sstAnnualArray[,,grep(y,years)] <- apply(yearSST,c(1,2),function(x) mean(x, na.rm=T))
-  }
-  
-  return(sstAnnualArray)
-}
-
-coordinates(y) <- c(2, 1)
-
-z <- extract(x, y)
+Yay!!! They match. Though the time savings are smaller than expected - lm is probably the bottleneck? So not much can be done?
 
 extract((x, y, method='simple', buffer=NULL, small=FALSE, cellnumbers=FALSE, 
      fun=NULL, na.rm=TRUE, layer, nl, df=FALSE, factors=FALSE, ...))
