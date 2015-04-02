@@ -118,18 +118,32 @@ beep()
 # that we are interested in.
 # We can use the fact that the year indices correspond to the band number
 getSSTAnnualRasters <- function(hadsst_raster, years = 1969:2011) {
-    #year_ind_list <- list(years = years, inds = se)
-    apply(matrix(years), 1, function(x) {
-        browser()
+    # Need to set up list of years and a corresponding index to allow renaming
+    # of the raster@z value.
+    seqlen <- seq_along(years)
+    x <- c(years, seqlen)
+    x <- matrix(x, ncol = 2)
+    year_list <- lapply(seqlen, function(i) x[i, ])
 
-        yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
+    lapply(year_list, function(elem) {
+    browser()
+        yearIDx <- which(chron::years(hadsst_raster@z$Date) == elem[[1]])
         subset_x <- subset(hadsst_raster, yearIDx) 
         means <- raster::calc(subset_x, mean, na.rm = TRUE)
+        means@z[1] <- elem[[1]]
         return(means)
-    }
-    apply(seq_along(years), 1)
-    )
+    })
 }
+
+years <- 2000:2011
+seqlen <- seq_along(years)
+x <- c(years, y)
+x <- matrix(x, ncol = 2)
+lapply(seqlen, function(i) x[i, ])
+
+lapply(seq_len(ncol(x)), function(i) x[i,])
+
+annual_rast_2011 <- getSSTAnnualRasters(hadsst_raster = b, years = 2010:2011)
 ```
 
 Now let's start testing this function and seeing if it matches up with Jarrett's.
