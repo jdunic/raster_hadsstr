@@ -232,10 +232,6 @@ total_avg4
 
 getSSTAvgOverYears2() was the fastest calculation of average time over years. It is just an expansion of the original getSSTAnnualRasters() function without an apply to break up all the different years into their own rasters.
 
-# Jarrett
-identical(as.vector(sstData$sstArray[, , 1]), values(b1))
-
-head(as.vector(sstData$sstArray[, , 1]))
 
 Let's move onto the linear change data.
 
@@ -267,17 +263,6 @@ start_lin2 <- proc.time()
 lin_change_rast <- getSSTLinChangeRaster(hadsst_raster = b, years = 2000:2011)
 total_lin2 <- proc.time() - start_lin2
 beep()
-c(total1, total2)
-
-start1 <- Sys.time()
-test_means1 <-  
-apply(matrix(2000:2011), 1, function(x) {
-    year_inds <- which(chron::years(z@z$Date) == x)
-    sub_x <- subset(z, year_inds)
-    test_means <- calc(sub_x, mean, na.rm = TRUE)
-})
-total1 <- Sys.time() - start1
-
 
 # Time comparisons
 total_lin1
