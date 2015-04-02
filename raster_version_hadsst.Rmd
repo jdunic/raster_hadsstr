@@ -119,7 +119,7 @@ beep()
 # We can use the fact that the year indices correspond to the band number
 getSSTAnnualRasters <- function(hadsst_raster, years = 1969:2011) {
     apply(matrix(years), 1, function(x) {
-    browser()
+    #browser()
         yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
         subset_x <- subset(hadsst_raster, yearIDx) 
         means <- raster::calc(subset_x, mean, na.rm = TRUE)
@@ -177,21 +177,31 @@ Now let's try to get the average sea surface temperature across years.
 
 ```{r}
 # Using Jarrett's package
-SSTAvgOverYears1 <- getSSTAvgMat(sstData, years = 2000:2011)
+start_avg1 <- proc.time()
+SSTAvgOverYears1 <- getSSTAvgMat(sstData, years = 1969:2011)
+total_avg1 <- proc.time() - start_avg1
 beep()
 
-AnnualRasterList <- getSSTAnnualRasters(hadsst_raster, years = 1969:2011)
-AnnualRasterBrick <- brick(AnnualRasterList)
-apply(matrix(years), 1, function(x) {
-        yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
-        subset_x <- subset(hadsst_raster, yearIDx) 
-        means <- raster::calc(subset_x, mean, na.rm = TRUE)
-        means@z <- as.Date(x)
-        return(means)
-    })
+# Using new rasters years averaged function
+getSSTAvgOverYears <- function(hadsst_raster = b, years = 1969:2011) {
+    AnnualRasterList <- getSSTAnnualRasters(hadsst_raster, years = years)
+    AnnualRasterBrick <- raster::brick(AnnualRasterList)
+    SSTAvgOverYears <- raster::calc(AnnualRasterBrick, mean, na.rm = TRUE)
+    return(SSTAvgOverYears)
+}
 
+start_avg2 <- proc.time()
+SSTAvgOverYears2 <- getSSTAvgOverYears(hadsst_raster = b, years = 1969:2011)
+total_avg2 <- proc.time() - start_avg2
+beep()
 
+total_avg1
+total_avg2
 ```
+
+Gains are diminishing as we go down the raster route. Is this worth continuing?
+
+
 
 ```{r}
 li <- length(sstData$lat)
