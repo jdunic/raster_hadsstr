@@ -1,0 +1,314 @@
+The dependencies so far are: raster, netcdf (should check if others are needed).
+
+```{r}
+# Let's load them for now
+library(raster)
+library(hadsstR)
+library(beepr)
+setwd('Meta_analysis_ms')
+```
+
+Note to self... when loading multiple rasters, they get dumped into a temp raster directory... this can eat up disk space. Use rasterOptions() to see where your tmpdir is located. To clear this, you can apparently use removeTmpFiles(h = 24) to remove files older than 24 hours. I had to manually delete through terminal.
+
+```{r}
+rasterOptions()
+```
+
+Let's start by trying to figure out the fastest way to load the HadISST data and compare these new methods to that currently used by Jarrett's current hadsstR package.
+
+This is the first option which is a bit dodgy, it uses reclassify which really slows things down:
+
+```{r}
+# Load netcdf as a raster brick object
+load_start1 <- proc.time()
+f <- 'Data/HadISST_sst.nc'
+b <- raster::brick(f)
+m <- matrix(c(-1001, -999, NA), ncol = 3)
+b <- raster::reclassify(b, m, right = NA)
+load_end1 <- proc.time() - load_start1
+beep()
+```
+This is Jarrett's original load function:
+
+```{r}
+# Compare with time to load 
+load_start2 <- proc.time()
+sstData <- loadHadSST(directory="Data/", hadsstFilename="HadISST_sst.nc"); beep()
+load_end2 <- proc.time() - load_start2
+beep()
+```
+
+This is the third option which reads the netcdf data in as a rasterBrick and then converts some pesky -1000 values (place holders for NA) into actual NA values. This is so fast!
+
+```{r}
+# Best option to load HadISST data
+loadHadSST1 <- function(directory="./", hadsstFilename="HadISST_sst.nc") {
+    f1 <- paste0(directory, hadsstFilename)
+    b <- raster::brick(f1)
+    raster::NAvalue(b) <- -1000
+    return(b)
+}
+
+# Initial framework code used to build loadHadSST1
+f <- 'Data/HadISST_sst.nc'
+b <- raster::brick(f)
+NAvalue(b) <- -1000
+
+# Let's test it:
+load_start3 <- proc.time()
+b <- loadHadSST1(directory = 'Data/', hadsstFilename = 'HadISST_sst.nc')
+load_end3 <- proc.time() - load_start3
+beep()
+```
+
+Let's do a time comparison between the three loading methods:
+
+```{r}
+load_end1
+load_end2
+load_end3
+```
+
+Run a series of tests to make sure that I can get the same results as Jarrett's code.
+
+```{r}
+# What is the minimum temperature value of the data from 1870-01-16
+
+# Jarrett
+min(sstData$sstArray[, , 1], na.rm = TRUE)
+
+# Jillian
+b1 <- subset(b, 1)
+min(values(b1), na.rm = T)
+# should be -1.8
+```
+
+```{r}
+# Are the two sst vectors equivalent?
+
+identical(as.vector(sstData$sstArray[, , 1]), values(b1))
+
+# No they are not identical.
+```
+The raster slice for 1870-01-16 is not equal to the same array in the sstData. Why not? They are equivalent when the lat is flipped for the sstData\$sstArray. Do we have to flip the raster version? When we plot the raster version of the data does it look like it maps properly? What would it look like if the lat was flipped? (open question). Because below it looks like the raster is correctly representing the HadISST data.
+
+
+```{r}
+plot(b1, par(bg = 'black', mar = rep(0.5, 4)))
+```
+
+We can try and check if we can extract equivalent values for a given lat lon. But first, to compare the results to Jarrett's function output we need to get the summary climate matrices in hadsstR, and make a new function to get the mean sst for a given year or set of years using raster.
+
+
+```{r}
+# Here is some test code used to derive the get SSTAnnual average raster
+start1 <- proc.time()
+
+test_means1 <-  
+  apply(matrix(2000:2011), 1, function(x) {
+    year_inds <- which(chron::years(b@z$Date) == x)
+    sub_x <- subset(b, year_inds)
+    test_means <- calc(sub_x, mean, na.rm = TRUE)
+  })
+
+total1 <- proc.time() - start1
+beep()
+
+# Generalize the code above into a function to get set of rasters for each year
+# that we are interested in.
+# We can use the fact that the year indices correspond to the band number
+getSSTAnnualRasters <- function(hadsst_raster, years = 1969:2011) {
+    #year_ind_list <- list(years = years, inds = se)
+    apply(matrix(years), 1, function(x) {
+        browser()
+
+        yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
+        subset_x <- subset(hadsst_raster, yearIDx) 
+        means <- raster::calc(subset_x, mean, na.rm = TRUE)
+        return(means)
+    }
+    apply(seq_along(years), 1)
+    )
+}
+```
+
+Now let's start testing this function and seeing if it matches up with Jarrett's.
+
+```{r}
+# Load some sample data - lat/lon values from the ocean
+lat <- c(-74.903173,  -6.680232,  18.728598, 58.438787, 38.065723)
+lon <- c(-45.068090, -105.823552, -110.122704, -0.357954, -122.392813)
+test_vals <- data.frame("lat" = lat, "lon" = lon)
+# Convert test_vals into a spatial object
+# The assignments specifies which columns have your c(lat, long)
+test_vals_sp <- test_vals
+sp::coordinates(test_vals_sp) <- c(2, 1)
+raster::projection(test_vals_sp) <- 
+  "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# Jarrett's version:
+# Get indices for a given lat/lon
+test_vals[1, ]
+values1 <- getLatLonIDX(lat = test_vals[1, 'lat'], lon = test_vals[1, 'lon'], sstData)
+
+# Get mean values for the year 2011 (average temperature across 12 months)
+# - need to get all the climate matrices for 
+cMats_2011 <- getClimateChange(sstData, years = 2011)
+
+# Get mean sst at given lat/lon
+mean1_latlon <- getClimateLatLon(sstMatsObj = cMats_2011, 
+                                 lat = test_vals[1, 'lat'], 
+                                 lon = test_vals[1, 'lon'], 
+                                 measure = 'average')
+
+# Raster version output
+# MUST REMEMBER that getSSTAnnualRasters returns a list
+annual_rast_2011 <- getSSTAnnualRasters(hadsst_raster = b, years = 2011)
+mean2_latlon <- raster::extract(annual_rast_2011[[1]], test_vals_sp[1])
+
+
+# YAYAYAYAYAY
+mean1_latlon == mean2_latlon
+```
+
+Ok, so it looks like right now things are good. This begins to assuage my concern that the 'flipped' lat values of the netcdf to array that Jarrett had to do is not a concern in the raster data (which is presumably smart enough to associate cells with the right coordinates). This in addition to the normal plot of the raster, *b*, makes me feel better.
+
+Now let's try to get the average sea surface temperature across years.
+
+
+```{r}
+# Using Jarrett's package
+SSTAvgOverYears1 <- getSSTAvgMat(sstData, years = 2000:2011)
+beep()
+
+AnnualRasterList <- getSSTAnnualRasters(hadsst_raster, years = 1969:2011)
+AnnualRasterBrick <- brick(AnnualRasterList)
+apply(matrix(years), 1, function(x) {
+        yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
+        subset_x <- subset(hadsst_raster, yearIDx) 
+        means <- raster::calc(subset_x, mean, na.rm = TRUE)
+        means@z <- as.Date(x)
+        return(means)
+    })
+
+
+```
+
+```{r}
+li <- length(sstData$lat)
+x <- sstData$sstArray[,1:li,]
+x <- sstData$sstArray[,li:1,]
+
+identical(x, values(b1))
+```
+
+
+# Jarrett
+identical(as.vector(sstData$sstArray[, , 1]), values(b1))
+
+head(as.vector(sstData$sstArray[, , 1]))
+
+head(values(b1))
+
+# Jillian
+b1 <- subset(b, 1)
+min(values(b1), na.rm = T)
+# should be -1.8
+```{r}
+
+b <- loadHadSST1(directory = 'Data/', hadsstFilename = 'HadISST_sst.nc')
+
+b1 <- subset(b, 1)
+
+
+z <- raster()
+
+# get raster indices for which the year is 2011
+# we can use the fact that the year indices correspond to the band number
+getSSTAnnual <- function(sstObj, years = 1969:2011) {
+    apply(matrix(years), 1, function(x) {
+        yearIDx <- which(chron::years(sstObj@z$Date) == x)
+        subset_x <- subset(sstObj, yearIDx) 
+        means <- raster::calc(subset_x, mean, na.rm = TRUE)
+        return(means)
+    })
+}
+
+#sstObj, must be given as list index - need to figure this shit out
+getLatLong <- function(sstObj, data, lat, lon, measure = NA) {
+    coordinates(data) <- ~lon + lat
+    extract(sstObj, data)
+}
+
+fl_combined2 <- read.csv('Data/full_data_with_impacts20150330.csv')
+coordinates(fl_combined2) <- ~fl_combined2$Long.y+fl_combined2$Lat.y
+coordinates(fl_combined2) = ~Long.y + Lat.y
+
+extract(mean_ssts[[1]], fl_combined2)
+
+mean_ssts <- getSSTAnnual(b, years = 2014)
+beep()
+
+start1 <- Sys.time()
+mean_SSTs <- getSSTAnnual(z, years = 2014)
+total1 <- Sys.time() - start1
+
+start2 <- Sys.time()
+mean_SSTArray <- getSSTAnnualArray(sstData, years = 2014)
+total2 <- Sys.time() - start2
+
+beep()
+c(total1, total2)
+
+start1 <- Sys.time()
+test_means1 <-  
+apply(matrix(2000:2011), 1, function(x) {
+    year_inds <- which(chron::years(z@z$Date) == x)
+    sub_x <- subset(z, year_inds)
+    test_means <- calc(sub_x, mean, na.rm = TRUE)
+})
+total1 <- Sys.time() - start1
+
+
+subset_x <- which(chron::years(z@z$Date) == 2000:2011)
+x_2011 <- subset(z, subset_x)
+test_means <- stackApply(x_2011, subset_x, mean, na.rm=TRUE)
+total1 <-  Sys.time() - start1
+
+    
+
+
+get_test_annual raster
+
+f <- 'Data/HadISST_sst.nc'
+b <- brick(f, lvar=4)
+
+z <- raster::brick('Data/HadISST_sst.nc')
+
+x1 <- raster::raster(z, band = 1)
+
+us <- unstack(z)
+
+getSSTAnnualArray <- function(sstObj, years=1969:2009){
+  #Calculate an annual Average temperature map
+  li <- length(sstObj$lat)
+  lj <- length(sstObj$lon)
+  sstAnnualArray <- array(NA, c(lj,li, length(years)))
+  for(y in years){
+    #which pieces of the SST array do we want?
+    idx <- grep(y,sstObj$tdates)
+    #extract a subset of the big data set
+    yearSST <- sstObj$sstArray[,,idx]
+    #average each lat/long per year and fill in the right place in b
+    sstAnnualArray[,,grep(y,years)] <- apply(yearSST,c(1,2),function(x) mean(x, na.rm=T))
+  }
+  
+  return(sstAnnualArray)
+}
+
+coordinates(y) <- c(2, 1)
+
+z <- extract(x, y)
+
+extract((x, y, method='simple', buffer=NULL, small=FALSE, cellnumbers=FALSE, 
+     fun=NULL, na.rm=TRUE, layer, nl, df=FALSE, factors=FALSE, ...))
