@@ -178,37 +178,56 @@ Now let's try to get the average sea surface temperature across years.
 ```{r}
 # Using Jarrett's package
 start_avg1 <- proc.time()
-SSTAvgOverYears1 <- getSSTAvgMat(sstData, years = 1969:2011)
+SSTAvgOverYears0 <- getSSTAvgMat(sstData, years = 1990:2011)
 total_avg1 <- proc.time() - start_avg1
 beep()
 
 # Using new rasters years averaged function
-getSSTAvgOverYears <- function(hadsst_raster = b, years = 1969:2011) {
+getSSTAvgOverYears1 <- function(hadsst_raster = b, years = 1969:2011) {
+    
     AnnualRasterList <- getSSTAnnualRasters(hadsst_raster, years = years)
     AnnualRasterBrick <- raster::brick(AnnualRasterList)
     SSTAvgOverYears <- raster::calc(AnnualRasterBrick, mean, na.rm = TRUE)
     return(SSTAvgOverYears)
 }
 
+# Best function!
+getSSTAvgOverYears2 <- function(hadsst_raster = b, years = 1969:2011) {
+    yearIDs <- which(chron::years(hadsst_raster@z$Date) %in% years)
+    subset_x <- subset(hadsst_raster, yearIDs)
+    SSTAvgOverYears <- raster::calc(subset_x, mean, na.rm = TRUE)
+    return(SSTAvgOverYears)
+    }
+
+getSSTAvgOverYears3 <- function(hadsst_raster = b, years = 1969:2011) {
+    AnnualRasterList <- getSSTAnnualRasters(hadsst_raster, years = years)
+    AnnualRasterStack <- raster::stack(AnnualRasterList)
+    SSTAvgOverYears <- raster::calc(AnnualRasterStack, mean, na.rm = TRUE)
+    return(SSTAvgOverYears)
+}
+
+
 start_avg2 <- proc.time()
-SSTAvgOverYears2 <- getSSTAvgOverYears(hadsst_raster = b, years = 1969:2011)
+SSTAvgOverYears2 <- getSSTAvgOverYears(hadsst_raster = b, years = 1990:2011)
 total_avg2 <- proc.time() - start_avg2
 beep()
 
+start_avg3 <- proc.time()
+SSTAvgOverYears3 <- getSSTAvgOverYears2(hadsst_raster = b, years = 1990:2011)
+total_avg3 <- proc.time() - start_avg3
+beep()
+
+start_avg4 <- proc.time()
+SSTAvgOverYears4 <- getSSTAvgOverYears3(hadsst_raster = b, years = 1990:2011)
+total_avg4 <- proc.time() - start_avg4
+beep()
+
+# Time comparisons
 total_avg1
 total_avg2
-```
+total_avg3
+total_avg4
 
-Gains are diminishing as we go down the raster route. Is this worth continuing?
-
-
-
-```{r}
-li <- length(sstData$lat)
-x <- sstData$sstArray[,1:li,]
-x <- sstData$sstArray[,li:1,]
-
-identical(x, values(b1))
 ```
 
 
