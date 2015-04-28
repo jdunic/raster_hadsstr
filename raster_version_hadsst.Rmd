@@ -78,17 +78,62 @@ Run a series of tests to make sure that I can get the same results as Jarrett's 
 min(sstData$sstArray[, , 1], na.rm = TRUE)
 
 # Jillian
-b1 <- subset(b, 1)
+b1 <- raster::subset(b, 1)
 min(values(b1), na.rm = T)
 # should be -1.8
+
+# Are there any different values?
+setdiff(as.vector(sstData$sstArray[, , 1]), values(b1))
+setequal(as.vector(sstData$sstArray[, , 1]), values(b1))
+
+# Do the data line up perfectly?
+identical(as.vector(sstData$sstArray[, , 1]), values(b1))
+
+# They do no because the sstArray is on it's side
+
+```
+
+Let's flip the sstArray into something we can compare to b1.
+
+```{r}
+# Confirm the orientation of the sstArray in comparison to b1
+array1 <- sstData$sstArray[, , 1]
+dim(array1)
+dim(as.matrix(b1))
+
+array1_rast <- raster(nrows=360, ncols=180)
+array1_rast[] <- array1
+
+plot(array1_rast)
+plot(b1)
+
+# Getting the right orientation of the sstArray!
+updwn <- t(apply(array1, 2, rev))
+lftside <- t(apply(updwn, 2, rev))
+upright <- t(apply(lftside, 2, rev))
+
+# Interjection (getting sick of flipping everything)
+get_upright_array <- function(ass_backwards_array) {
+    updwn <- t(apply(ass_backwards_array, 2, rev))
+    lftside <- t(apply(updwn, 2, rev))
+    upright <- t(apply(lftside, 2, rev))
+    return(upright)
+}
+
+dev.set(5)
+array1_rast <- raster(nrows=180, ncols=360)
+array1_rast[] <- upright
+plot(array1_rast)
+
 ```
 
 ```{r}
 # Are the two sst vectors equivalent?
+# We need to transpose upright before comparing to the values in b1 because 
+# raster::values reads row by row, whereas as.vector() reads column by column
+identical(as.vector(t(upright)), values(b1))
 
-identical(as.vector(sstData$sstArray[, , 1]), values(b1))
-
-# No they are not identical.
+# YES!
 ```
 The raster slice for 1870-01-16 is not equal to the same array in the sstData. Why not? They are equivalent when the lat is flipped for the sstData\$sstArray. Do we have to flip the raster version? When we plot the raster version of the data does it look like it maps properly? What would it look like if the lat was flipped? (open question). Because below it looks like the raster is correctly representing the HadISST data.
 
@@ -107,8 +152,8 @@ start1 <- proc.time()
 test_means1 <-  
   apply(matrix(2000:2011), 1, function(x) {
     year_inds <- which(chron::years(b@z$Date) == x)
-    sub_x <- subset(b, year_inds)
-    test_means <- calc(sub_x, mean, na.rm = TRUE)
+    sub_x <- raster::subset(b, year_inds)
+    test_means <- raster::calc(sub_x, mean, na.rm = TRUE)
   })
 
 total1 <- proc.time() - start1
@@ -119,16 +164,15 @@ beep()
 # We can use the fact that the year indices correspond to the band number
 getSSTAnnualRasters <- function(hadsst_raster, years = 1969:2011) {
     apply(matrix(years), 1, function(x) {
-    #browser()
         yearIDx <- which(chron::years(hadsst_raster@z$Date) == x)
-        subset_x <- subset(hadsst_raster, yearIDx) 
+        subset_x <- raster::subset(hadsst_raster, yearIDx) 
         means <- raster::calc(subset_x, mean, na.rm = TRUE)
         means@z[1] <- x
         return(means)
     })
 }
 
-annual_rast_2011 <- getSSTAnnualRasters(hadsst_raster = b, years = 2010:2011)
+annual_rast_2011 <- getSSTAnnualRasters(hadsst_raster = b, years = 2011)
 ```
 
 Now let's start testing this function and seeing if it matches up with Jarrett's.
@@ -148,29 +192,69 @@ raster::projection(test_vals_sp) <-
 # Jarrett's version:
 # Get indices for a given lat/lon
 test_vals[1, ]
-values1 <- getLatLonIDX(lat = test_vals[1, 'lat'], lon = test_vals[1, 'lon'], sstData)
+values1 <- getLatLonIDX(lat = test_vals[, 'lat'], lon = test_vals[, 'lon'], sstData)
 
 # Get mean values for the year 2011 (average temperature across 12 months)
 # - need to get all the climate matrices for 
 cMats_2011 <- getClimateChange(sstData, years = 2011)
 
-# Get mean sst at given lat/lon
-mean1_latlon <- getClimateLatLon(sstMatsObj = cMats_2011, 
-                                 lat = test_vals[1, 'lat'], 
-                                 lon = test_vals[1, 'lon'], 
-                                 measure = 'average')
+# Get mean sst at test lat/lon:
+mean1_latlon <- apply(test_vals, 1, function(x) {
+                        getClimateLatLon(cMats_2011, x['lat'], x['lon'], 
+                                         measure = 'average')
+                        }
+                )
 
 # Raster version output
 # MUST REMEMBER that getSSTAnnualRasters returns a list
 annual_rast_2011 <- getSSTAnnualRasters(hadsst_raster = b, years = 2011)
-mean2_latlon <- raster::extract(annual_rast_2011[[1]], test_vals_sp[1])
+mean2_latlon <- raster::extract(annual_rast_2011[[1]], test_vals_sp)
 
-
-# YAYAYAYAYAY
+# YAYAYAYAYAY -- they match!!!
 mean1_latlon == mean2_latlon
+
+# Let's do another test
+avgmat1 <- getSSTAvgMat(sstData, years = 2011)
+avgmat1_rast <- raster(ncols=180, nrows=360)
+avgmat1_rast[] <- avgmat1
+plot(avgmat1_rast)
+
+# Therefore, rows = latitudes, columns = longitude
+# Flip this matrix -90˚.
+
+updwn <- t(apply(avgmat1, 2, rev))
+lftside <- t(apply(updwn, 2, rev))
+upright <- t(apply(lftside, 2, rev))
+
+# Just visualizing the different orientations here
+avgmat1_rast <- raster(nrows=360, ncols=180)
+avgmat1_rast[] <- avgmat1
+plot(avgmat1_rast)
+
+avgmat1_rast <- raster(nrows=180, ncols=360)
+avgmat1_rast[] <- updwn
+plot(avgmat1_rast)
+
+avgmat1_rast <- raster(nrows=360, ncols=180)
+avgmat1_rast[] <- lftside
+plot(avgmat1_rast)
+
+avgmat1_rast <- raster(nrows=180, ncols=360)
+avgmat1_rast[] <- upright
+plot(avgmat1_rast)
+
+
+# Let's compare exact values again:
+identical(as.vector(t(upright)), values(annual_rast_2011[[1]]))
+all.equal(as.vector(t(upright)), values(annual_rast_2011[[1]]))
+
+# Lesson learned. For comparisons all.equal() is better than identical()... 
+# See this answer at stackoverflow:
+# http://stackoverflow.com/questions/9508518/why-are-these-numbers-not-equal
+
 ```
 
-Ok, so it looks like right now things are good. This begins to assuage my concern that the 'flipped' lat values of the netcdf to array that Jarrett had to do is not a concern in the raster data (which is presumably smart enough to associate cells with the right coordinates). This in addition to the normal plot of the raster, *b*, makes me feel better.
+Well this is looking promising...
 
 Now let's try to get the average sea surface temperature across years.
 
@@ -206,9 +290,20 @@ getSSTAvgOverYears3 <- function(hadsst_raster = b, years = 1969:2011) {
     return(SSTAvgOverYears)
 }
 
+# New function added april 7 to deal with error when passing in large ranges of
+# years: 
+# Error in ncdf::close.ncdf(x@file@con) : 
+  # no slot of name "con" for this object of class ".RasterFile"
+getSSTAvgOverYears <- function(hadsst_raster = b, years = 1969:2011) {
+    yearIDs <- which(chron::years(hadsst_raster@z$Date) %in% years)
+    subset_x <- raster::subset(hadsst_raster, yearIDs)
+    SSTAvgOverYears <- mean(subset_x, na.rm = T)
+    return(SSTAvgOverYears)
+    }
+
 
 start_avg2 <- proc.time()
-SSTAvgOverYears2 <- getSSTAvgOverYears(hadsst_raster = b, years = 1990:2011)
+SSTAvgOverYears2 <- getSSTAvgOverYears1(hadsst_raster = b, years = 1990:2011)
 total_avg2 <- proc.time() - start_avg2
 beep()
 
@@ -249,6 +344,7 @@ getSSTLinChangeRaster <- function(hadsst_raster = b, years = 2000:2011) {
 
     time_ <- I(years - mean(years))
     fun <- function(x) { 
+        browser()
         if (sum(is.na(x)) < length(x)) {
         slope <- 10 * lm(x ~ time_)$coefficients[2]
         return(slope)
@@ -272,11 +368,719 @@ total_lin2
 Now for a little bit of testing and value checking.
 
 ```{r}
+# For a start, do we have matching min and max values?
 min(linChangeMat, na.rm = T) == lin_change_rast@data@min
 max(linChangeMat, na.rm = T) == lin_change_rast@data@max
+
+identical(as.vector(t(linChangeMat)), values(lin_change_rast[[1]]))
+all.equal(as.vector(t(linChangeMat)), values(lin_change_rast[[1]]))
+
+# Argh. Comparing the wrong orientation of the array again.
+upright <- get_upright_array(linChangeMat)
+identical(as.vector(t(upright)), values(lin_change_rast[[1]]))
+all.equal(as.vector(t(upright)), values(lin_change_rast[[1]]))
+
+# Oh my goodness this has worked out PERFECTLY. This makes me trés content.
+
 ```
 
-Yay!!! They match. Though the time savings are smaller than expected - lm is probably the bottleneck? So not much can be done?
+Yay!!! They match. I have just been comparing the incorrectly oriented array this whole time :|. The time savings are smaller than expected - lm is probably the bottleneck? So not much can be done?
 
-extract((x, y, method='simple', buffer=NULL, small=FALSE, cellnumbers=FALSE, 
-     fun=NULL, na.rm=TRUE, layer, nl, df=FALSE, factors=FALSE, ...))
+Ok, onto the last and probably hardest part for me. Getting to the climate velocities...
+
+
+Starting with the WE change. 
+
+```{r}
+# Initialize test raster
+set.seed(1)
+r <- raster(ncols=6, nrows=4, xmn=0)
+r[] <- sample(1:24, size = 24, replace = TRUE)
+plot(r)
+
+r_mat <- as.matrix(r)
+
+f <- matrix(rep(1, 9), nrow=3, ncol=3)
+
+lat <- coordinates(r)[, 2]
+
+# flip the damn matrix - this hurts my brain
+equiv_mat <- t(r_mat[nrow(r_mat):1, ])
+
+getWEChangeMat <- function(averageMat,latitudes){
+  #browser()
+  #make change matrices
+  WEmat <- averageMat[1:(nrow(averageMat)-1),] - averageMat[2:nrow(averageMat),]
+  WEmat <- rbind(WEmat, averageMat[nrow(averageMat),] - averageMat[1,])
+  WEmat <- t(t(WEmat)/111.325) * cos(latitudes * pi / 180)
+  WEmat * -1 #multiplying by -1 so that it is compatible with Burrows, higher temp in the East
+}
+
+test <- getWEChangeMat(equiv_mat, lat)
+
+# This was a big screw up, I only need adjacent cell differences
+#EWdiffs <- function(avg_raster) {
+#    f <- matrix(rep(1, 2), nrow=1, ncol=2)
+#    focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+#    fun = function(x, ...) {
+#        browser()
+#        ba <- x[2] - x[1]
+#        cb <- x[3] - x[2]
+#        ed <- x[5] - x[4]
+#        fe <- x[6] - x[5]
+#        hg <- x[8] - x[7]
+#        ih <- x[8] - x[9]
+        #return(matrix(c(ba, cb, ed, fe, hg, ih), nrow = 3))
+#    }
+#    )
+#}
+
+WEdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    lat <- coordinates(avg_raster)[, 2]
+    EWdiff_raster <- focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          ba <- x[6] - x[5]
+                          }
+    )
+    EWdiff_adj <- (EWdiff_raster / 111.325) * cos (lat * pi / 180)
+}
+
+test2 <- WEdiffs(r)
+test2 <- as.matrix(test2)
+
+test
+test2_rot <- t(test2[nrow(test2):1, ])
+test2_rot[-nrow(test2_rot), ]
+test[-nrow(test), ]
+
+```
+Ok, a quick visual check of those matrices makes me think things are going alright. I feel stupid for not realizing I just needed to do the cell beside the focal cell - the cell next to it. In this case, the first column = column2 - column1. Now what happens when we try this with real data...
+
+
+```{r}
+# Let's get a test matrix to compare functions
+# Jarrett
+avgmat1 <- getSSTAvgMat(sstData, years = 2011)
+# Jillian
+avgmat2 <- getSSTAvgOverYears2(hadsst_raster = b, years = 2011)
+
+# Just to be sure, do these data match?
+upright <- get_upright_array(avgmat1)
+identical(as.vector(t(upright)), values(avgmat2[[1]]))
+all.equal(as.vector(t(upright)), values(avgmat2[[1]]))
+
+# Okay again, I think this is a float issue. So I'm not concerned
+#> which(as.vector(t(upright)) != values(avgmat2[[1]]))
+#[1] 53903 55553
+
+# I was having equality issues so I have left out the distance correction 
+# function
+# Run Jarrett's code because this is not an exported function
+getWEChangeMat <- function(averageMat,latitudes){
+  #browser()
+  #make change matrices
+  WEmat <- averageMat[1:(nrow(averageMat)-1),] - averageMat[2:nrow(averageMat),]
+  WEmat <- rbind(WEmat, averageMat[nrow(averageMat),] - averageMat[1,])
+  #WEmat <- t(t(WEmat)/111.325) * cos(latitudes * pi / 180)
+  WEmat * -1 #multiplying by -1 so that it is compatible with Burrows, higher temp in the East
+}
+
+WE_mat <- getWEChangeMat(avgmat1, latitudes = sstData$lat)
+
+# New raster function. Uses the focal function in raster, to get neighourhood 
+# cells but then just takes the difference between the middle and the cell to 
+# it's left. I've set pad = TRUE so that the top cells are included in the 
+# calculation. (*Special note* - to match Jarrett's code I have used x[6] - x[5],
+# but the way it is specified in Burrows et al. 2011 it should be written as 
+# x[5] - x[4], which would leave NA values in the left column. I am unsure 
+# whether this has any effect on the final output).
+WEdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    lat <- sp::coordinates(avg_raster)[, 2]
+    WEdiff_raster <- raster::focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          ba <- x[6] - x[5]
+                          }
+    )
+    #WEdiff_adj <- (WEdiff_raster / 111.325) * cos(lat * pi / 180)
+}
+
+WE_rast <- WEdiffs(avgmat2)
+
+# Let's visualise our plots
+#dev.new()
+dev.set(2)
+rast_mat <- raster(nrows = 360, ncol = 180)
+rast_mat[] <- WE_mat
+plot(rast_mat)
+
+#dev.new()
+dev.set(3)
+rast_mat <- raster(nrows = 180, ncol = 360)
+rast_mat[] <- get_upright_array(WE_mat)
+plot(rast_mat)
+
+#dev.new()
+dev.set(4)
+plot(WE_rast)
+
+# The plots look the same but are the values the same?
+
+upright <- get_upright_array(WE_mat)
+identical(as.vector(t(upright)), values(WE_rast))
+all.equal(as.vector(t(upright)), values(WE_rast))
+
+# Grr, what an annoying little phenomenon. But at least I know it's just this 
+# floating point issue.
+#> which(as.vector(t(upright)) != values(WE_rast))
+#[1] 53902
+#> as.vector(t(upright))[53092]
+#[1] -0.05179295
+#> values(WE_rast)[53092]
+#[1] -0.05179295
+```
+
+Ok, so I was having real non-equality issues when the last step of correcting for distance at different latitudes. At least I've confirmed that the plain WE difference values are equivalent between the two outputs. Now time to work on applying the correction factor properly.
+
+```{r}
+# Run Jarrett's code because this is not an exported function and because above 
+# I changed the function. Here I put it back to normal.
+getWEChangeMat <- function(averageMat,latitudes){
+  #browser()
+  #make change matrices
+  WEmat <- averageMat[1:(nrow(averageMat)-1),] - averageMat[2:nrow(averageMat),]
+  WEmat <- rbind(WEmat, averageMat[nrow(averageMat),] - averageMat[1,])
+  WEmat <- t(t(WEmat)/111.325) * cos(latitudes * pi / 180)
+  WEmat * -1 #multiplying by -1 so that it is compatible with Burrows, higher temp in the East
+}
+
+WE_mat <- getWEChangeMat(avgmat1, latitudes = sstData$lat)
+
+
+# New raster function. Uses the focal function in raster, to get neighourhood 
+# cells but then just takes the difference between the middle and the cell to 
+# it's left. I've set pad = TRUE so that the top cells are included in the 
+# calculation
+WEdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    lat <- sp::coordinates(avg_raster)[, 2]
+    WEdiff_raster <- raster::focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          ba <- x[6] - x[5]
+                          }
+    )
+    WEdiff_adj <- (WEdiff_raster / 111.325) * cos(lat * pi / 180)
+}
+
+WE_rast <- WEdiffs(avgmat2)
+
+# Let's visualise our plots
+#dev.new()
+dev.set(2)
+rast_mat <- raster(nrows = 360, ncol = 180)
+rast_mat[] <- WE_mat
+plot(rast_mat)
+
+#dev.new()
+dev.set(3)
+rast_mat <- raster(nrows = 180, ncol = 360)
+rast_mat[] <- get_upright_array(WE_mat)
+plot(rast_mat)
+
+#dev.new()
+dev.set(4)
+plot(WE_rast)
+
+# Comparison 1
+upright <- get_upright_array(WE_mat)
+identical(as.vector(t(upright)), values(WE_rast))
+all.equal(as.vector(t(upright)), values(WE_rast))
+
+# Comparison 2
+# This is not a problem of latitudes being the wrong sign. Because I get the 
+# same problem as in comparison 1.
+WE_mat2 <- getWEChangeMat(avgmat1, latitudes = -1 * sstData$lat)
+upright <- get_upright_array(WE_mat2)
+identical(as.vector(t(upright)), values(WE_rast))
+all.equal(as.vector(t(upright)), values(WE_rast))
+
+# Let's bring back the test raster... but make it bigger
+# Initialize test raster
+set.seed(1)
+r <- raster(ncols=10, nrows=10, xmn=0)
+r[] <- sample(1:100, size = 100, replace = TRUE)
+plot(r)
+
+r_mat <- as.matrix(r)
+
+f <- matrix(rep(1, 9), nrow=3, ncol=3)
+
+lat <- coordinates(r)[, 2]
+
+# flip the damn matrix - this hurts my brain
+equiv_mat <- t(r_mat[nrow(r_mat):1, ])
+
+# Get test solutions
+test1 <- getWEChangeMat(equiv_mat, latitudes = lat)
+test2 <- WEdiffs(r)
+test2 <- as.matrix(test2)
+
+# Look at solutions
+test1
+test2_rot <- t(test2[nrow(test2):1, ])
+test2_rot[-nrow(test2_rot), ]
+test1[-nrow(test1), ]
+
+identical(test2_rot[-nrow(test2_rot), ], test1[-nrow(test1), ])
+```
+I don't know why I used a bigger raster but I wanted to just in case. I think the discrepancy is caused by latitudes. In the simple test cases I used the latitude and longitudes that corresponded to the raster objects because they create them upon initialization of the raster and there was no way for me to get equivalent values to test on the array method. I think I trust the raster output because coordinates are built into the object and so they are easier to manage. I think the integrity of data using rastesrs is better.
+
+Before I settle on this let me check if raster multiplication and division operate in the order of the array/raster that I think they do.
+
+```{r}
+as.matrix(r)
+
+# First value in the matrix is 27
+
+# Get the difference between cells
+diffs <- raster::focal(r, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          ba <- x[6] - x[5]
+                          })
+as.matrix(diffs)
+
+# Double check:
+# Difference between r[1, 1] and r[1, 2] comes out properly.
+as.matrix(diffs)[1, 1] == as.matrix(r)[1, 2] - as.matrix(r)[1, 1]
+# This is good.
+
+# Let's multiply this raster by a vector of different numbers to trace how they
+# are applied over the raster/matrix
+x <- c(0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+y <- r * x
+as.matrix(y)
+
+# Perfect, the are applied sequentially over rows. This means that the latitudes
+# should be correctly applied over the raster. Note that y values are the 
+# latitudes of the raster r, and repeat for the number of values in a row. 
+dim(as.matrix(r))
+sp::coordinates(r)[1:11, ]
+```
+
+This makes me think there is something a bit funky with the latitudes being used to calculate the WE spatial gradient using the array method. But I can't figure out what could be going on, so I could be wrong.
+
+
+Skip the stuff in this chunk. It's just old stuff I didn't want to throw away.
+
+```{r}
+### This chunk is no longer necessary but I'm keeping it for reference ###
+# Okay, the Jarrett version is a bit funky so let's just see what it looks like
+dev.set(2)
+rast_mat <- raster(nrows = 360, ncol = 180)
+rast_mat[] <- avgmat1
+plot(rast_mat)
+
+# Okay, it is really important to realize that this flipping thing is causing 
+# epic confusion with the comparisons
+sum(duplicated(as.vector(avgmat1))) + 
+length(intersect(as.vector(avgmat1), values(avgmat2))) + 
+length(setdiff(as.vector(avgmat1), values(avgmat2)))
+
+# The faact that this stuff adds up kind of makes me think that I'm working with
+# the same values just in a different arrangement
+setdiff(as.vector(avgmat1), values(avgmat2))
+# Why these two values are different I really don't understand..., I don't know
+# if this means that we can't trust the avgmat2 values or not?
+
+
+#note - you might think that I've reversed rows and columns in the below method
+#but, the matrices are stored on their sides - so this is a little wonky
+#e.g. I use rows for WE and columns for NS due to being a transposed matrix
+getWEChangeMat <- function(averageMat,latitudes){
+  #browser()
+  #make change matrices
+  WEmat <- averageMat[1:(nrow(averageMat)-1),] - averageMat[2:nrow(averageMat),]
+  WEmat <- rbind(WEmat, averageMat[nrow(averageMat),] - averageMat[1,])
+  WEmat <- t(t(WEmat)/111.325) * cos(latitudes * pi / 180)
+  WEmat * -1 #multiplying by -1 so that it is compatible with Burrows, higher temp in the East
+}
+
+bigtest <- getWEChangeMat(avgmat1, latitudes = sstData$lat)
+
+# Let's look again at what this WEChangeMat looks like...
+dev.set(3)
+rast_mat <- raster(nrows = 360, ncol = 180)
+rast_mat[] <- bigtest
+plot(rast_mat)
+
+# Okay--still sideways. Good to know. This means that we have to be careful 
+# with comparisons
+
+
+# Let's compare 
+
+EWdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    lat <- sp::coordinates(avg_raster)[, 2]
+    EWdiff_raster <- raster::focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          ba <- x[6] - x[5]
+                          }
+    )
+    EWdiff_adj <- (EWdiff_raster / 111.325) * cos(lat * pi / 180)
+}
+# Let's look at our 2011 raster
+dev.set(4)
+plot(avgmat2_crop)
+
+bigtest2 <- EWdiffs(avgmat2)
+# Now let's get our EWdiffs
+#bigtest2 <- EWdiffs(avgmat2_crop)
+
+# Let's plot test 2
+#dev.set(5)
+#plot(bigtest2)
+
+#bigtest2 <- as.matrix(bigtest2)
+#bigtest2_rot <- t(bigtest2[nrow(bigtest2):1, ])
+#head(bigtest2_rot[-nrow(bigtest2_rot), ])
+#head(bigtest[-nrow(bigtest), ])
+
+# Why are these so different!!!!!! They worked on the little test case above :(
+setdiff(as.vector(bigtest), values(bigtest2)))
+
+setdiff(round(as.vector(bigtest), 5), round(values(bigtest2), 5))
+# What is going on???
+
+```
+
+
+Okay, I am gaining hope for this raster method, let's do the NS gradient.
+
+
+```{r}
+# Bleh, let's move on and see if we can do better for the NS gradient?
+
+# Bring back test raster
+set.seed(1)
+r <- raster(ncols=6, nrows=4, xmn=0)
+r[] <- sample(1:24, size = 24, replace = TRUE)
+plot(r)
+
+r_mat <- as.matrix(r)
+
+f <- matrix(rep(1, 9), nrow=3, ncol=3)
+
+lat <- coordinates(r)[, 2]
+
+# flip the damn matrix - this hurts my brain
+equiv_mat <- t(r_mat[nrow(r_mat):1, ])
+
+# Jarrett's original:
+getNSChangeMat <- function(averageMat){
+  #NSmat <- averageMat[,2:ncol(averageMat)] - averageMat[,1:(ncol(averageMat)-1)] 
+  NSmat <- averageMat[,1:(ncol(averageMat)-1)] - averageMat[,2:ncol(averageMat)]
+  NSmat <- cbind(NSmat, NA)
+  NSmat <- NSmat/111.325
+  NSmat 
+}
+
+nstest1 <- getNSChangeMat(equiv_mat)
+NSChangeMat <- getNSChangeMat(avgmat1)
+
+NSdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    NSdiff_raster <- raster::focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          #browser()
+                          be <- x[2] - x[5]
+                          }
+    )
+    NSdiff_adj <- NSdiff_raster / 111.325
+}
+
+nstest2 <- NSdiffs(r)
+
+nstest1
+as.matrix(nstest2)
+
+# Get test solutions
+nstest2 <- as.matrix(nstest2)
+nstest2_rot <- t(nstest2[nrow(nstest2):1, ])
+
+# Look at solutions
+nstest1
+nstest2_rot
+
+identical(nstest1, nstest2_rot)
+
+# Um, why is there a difference in signs... This is easily remedied, but now I'm 
+# not sure which is right, according to Burrows et al. 2011, it should be the top cell minus the bottom cell. Which is what I do with x[2] - x[5]
+
+# To be sure let's look at the neighbourhood vector that raster::focal() gets.
+as.matrix(r)
+just_diffs <- focal(r, w = f, nrow = 3, ncol = 3, pad = TRUE, 
+      fun = function(x) { 
+        be <- x[2] - x[5]
+      }
+)
+focal(r, w = f, nrow = 3, ncol = 3, pad = TRUE, 
+      fun = function(x) { 
+        print(x)
+      }
+)
+as.matrix(just_diffs)
+# This corresponds to the last cell in the raster:
+# The northern cell - the southern cell
+15 - 61 
+```
+
+Okay, now I am quite certain the NSChangeMat is backwards. Let's fix it and rerun the big test.
+
+```{r}
+# Correcting the getNSChange function to get the actual NS gradient
+getNSChangeMat <- function(averageMat){
+  NSmat <- averageMat[,2:ncol(averageMat)] - averageMat[,1:(ncol(averageMat)-1)] 
+  NSmat <- cbind(NSmat, NA)
+  NSmat <- NSmat/111.325
+  NSmat 
+}
+
+NSdiffs <- function(avg_raster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    NSdiff_raster <- raster::focal(avg_raster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          #browser()
+                          be <- x[2] - x[5]
+                          }
+    )
+    NSdiff_adj <- NSdiff_raster / 111.325
+}
+
+# Let's get a test matrix to compare functions
+# Jarrett
+avgmat1 <- getSSTAvgMat(sstData, years = 2011)
+# Jillian
+avgmat2 <- getSSTAvgOverYears2(hadsst_raster = b, years = 2011)
+
+NSdiff_mat <- getNSChangeMat(avgmat1)
+NSdiff_rast <- NSdiffs(avgmat2)
+
+# Let's plot it
+dev.set(3)
+rast_mat <- raster(nrows = 180, ncol = 360)
+rast_mat[] <- get_upright_array(NSdiff_mat)
+plot(rast_mat)
+
+#dev.new()
+dev.set(4)
+plot(NSdiff_rast)
+
+
+upright <- get_upright_array(NSdiff_mat)
+identical(as.vector(t(upright)), values(NSdiff_rast))
+all.equal(as.vector(t(upright)), values(NSdiff_rast))
+
+```
+
+WOOOOT! This is working out nicely!
+
+Moving onto getting the spatial gradient.
+
+```{r}
+# Jarrett
+# Need to run because this is not exported from hadsstR
+# function to get the spatially averaged gradient
+getSpatialGrad <- function(NSmat, WEmat, i, j){
+
+  li <- ncol(NSmat)
+  lj <- nrow(WEmat)
+  # print(c(i,j))
+  #get bounding box indices
+  id <- i+1
+  iu <- i-1
+  jl <- j-1
+  jr <- j+1
+  if(jr>li) jr<-1 #wrap
+  if(jl==0) jl<-li #wrap
+  if(id>lj) return(c(NA, NA)) #meh, it's ice
+  if(iu==0) return(c(NA, NA)) #meh, it's ice
+  
+  
+  yGrad <- weighted.mean(c(NSmat[i,j],NSmat[iu,j], 
+                           NSmat[iu,jl], NSmat[iu,jr], NSmat[id,jl], NSmat[id,jr]),
+                         c(2,2,rep(1,4)), na.rm=T)
+  #oops - did this the wrong direction, so, multiplying by -1 to correct
+  xGrad <- weighted.mean(c(WEmat[i,j],WEmat[i,jl], 
+                           WEmat[iu,jl], WEmat[iu,jr], WEmat[id,jl], WEmat[id,jr]),
+                         c(2,2,rep(1,4)), na.rm=T)
+  
+  #some convrsion to radial coordinates
+  vecSum <- sqrt(xGrad^2+yGrad^2)
+  vecAngle <- NA
+  if(!is.na(vecSum)){
+    vecAngle <- 90-atan2(yGrad, xGrad)*180/pi
+    if(vecAngle<0) vecAngle <- 360+vecAngle
+  }
+  
+  return(c(vecSum, vecAngle))
+  
+}
+
+getSpatialGradMatsFromMats <- function(NSmat, WEmat){
+  #greate matrices for spatial gradients and velocity
+  spatialMat <- matrix(NA, nrow=nrow(WEmat), ncol=ncol(WEmat))
+  angleMat <- matrix(NA, nrow=nrow(WEmat), ncol=ncol(WEmat))
+  
+  for(i in 1:nrow(spatialMat)){
+    for(j in 1:ncol(spatialMat)){
+      spatialGrad <- getSpatialGrad(NSmat, WEmat, i,j)
+      spatialMat[i,j] <- spatialGrad[1]
+      angleMat[i,j] <- spatialGrad[2]
+    }
+  }
+  
+  return(list(spatialGradMat = spatialMat, angleMat = angleMat))
+}
+
+getSpatialGradMats <- function(sstObj, years=1969:2009){
+  #get the array of temps over all years, averaged by year
+  sstAnnualArray <- getSSTAnnualArray(sstObj, years)
+  
+  #get the average matrix of temps
+  averageMat <-getSSTAvgMatFromArray(sstAnnualArray)
+  
+  #get info on spatial gradients
+  NSmat <- getNSChangeMat(averageMat)
+  WEmat <- getWEChangeMat(averageMat, sstObj$lat)
+  
+  getSpatialGradMatsFromMats(NSmat, WEmat)
+}
+
+# I think this new function works! Rasters are kind of cool.
+getSpatialGrad_raster <- function(NSraster, EWraster) {
+    f <- matrix(rep(1, 9), nrow=3, ncol=3)
+    xGrad <- raster::focal(EWraster, w = f, nrow=3, ncol=3, pad = TRUE,
+                          fun = function(x, ...) {
+                          #browser()
+                          wt <- c(1, 2, 1, 2, 0, 2, 1, 2, 1)
+                          weighted.mean(x, wt, na.rm = TRUE)
+                          })
+    yGrad <- raster::focal(NSraster, w = f, nrow = 3, ncol = 3, pad = TRUE, 
+                           fun = function(x, ...) {
+                           wt <- c(1, 2, 1, 2, 0, 2, 1, 2, 1)
+                           weighted.mean(x, wt, na.rm = TRUE)
+                           })
+
+    # Get magnitude of resultant vector
+    vecSum_rast <- sqrt(xGrad^2 + yGrad^2)
+
+    # Get angle of resultant vector
+    vecAngle <- atan2(xGrad, yGrad) * 180 / pi
+
+    # Create correction raster to produce positive angles
+    negAngle <- (vecAngle < 0) * 360
+#browser()
+
+    vecAngle <- overlay(x = vecAngle, y = negAngle, fun = function(x, y) {x + y})
+
+    spatial_grad_brick <- raster::brick(vecSum_rast, vecAngle)
+    names(spatial_grad_brick) <- c('spatialGrad', 'angle') 
+    return(spatial_grad_brick)
+}
+
+
+
+
+# The testing zone #
+
+# For the sake of testing let's try using the raster lat/lon
+
+# Array method
+spatial_grad_mat <- getSpatialGradMats(sstData, years = 2011)
+beep()
+
+# Raster method
+ewraster <- EWdiffs(avgmat2)
+nsraster <- NSdiffs(avgmat2)
+grad_rast <- getSpatialGrad_raster(NSraster = nsraster, EWraster = ewraster)
+beep()
+
+
+# Okay, so now at least we're working with equivalent gradient rasters. This way
+# I can test the spatial gradient calculation.
+upright <- get_upright_array(spatial_grad_mat$spatialGradMat)
+identical(as.vector(t(upright)), values(subset(grad_rast, subset = 'spatialGrad')))
+all.equal(as.vector(t(upright)), values(subset(grad_rast, subset = 'spatialGrad')))
+
+upright <- get_upright_array(spatial_grad_mat$angleMat)
+identical(as.vector(t(upright)), values(subset(grad_rast, subset = 'spatialGrad')))
+all.equal(as.vector(t(upright)), values(subset(grad_rast, subset = 'spatialGrad')))
+
+SpatialGradMat <- getSpatialGradMatsFromMats(nsmat, wemat)
+
+
+
+getVelocity_raster <- function(hadsst_raster, years = 1969:2009) {
+    LinChangeRaster <- getSSTLinChangeRaster(hadsst_raster, years)
+
+    AvgRaster <- getSSTAvgOverYears(hadsst_raster, years)
+
+    WEraster <- getWEdiffs(AvgRaster)
+    NSraster <- getNSdiffs(AvgRaster)
+    
+    SpatGradRaster <- getSpatialGrad_raster(NSraster, WEraster)
+
+    VelocityRaster <- LinChangeRaster / SpatGradRaster
+
+    return(VelocityRaster)
+}
+
+
+
+
+getClimateChange <- function(sstObj, years=1969:2009){
+  #get the array of temps over all years, averaged by year
+  sstAnnualArray <- getSSTAnnualArray(sstObj, years)
+  
+  #get the average matrix of temps
+  averageMat <-getSSTAvgMatFromArray(sstAnnualArray)
+  
+  #get the linear change matrix
+  linearChangeMat <-getSSTLinearChangeMatFromArray(sstAnnualArray, years)
+  
+  #get info on spatial gradients
+  NSmat <- getNSChangeMat(averageMat)
+  WEmat <- getWEChangeMat(averageMat, sstObj$lat)
+  
+  #greate matrices for spatial gradients and velocity
+  spatialMats <-   getSpatialGradMatsFromMats(NSmat, WEmat)
+  
+  velocityMat <- linearChangeMat/spatialMats$spatialGradMat
+  
+  ret <- list(averageMat=averageMat, linearChangeMat=linearChangeMat,
+              NSmat=NSmat,WEmat=WEmat, spatialGradMat=spatialMats$spatialGradMat,
+              angleMat = spatialMats$angleMat, velocityMat = velocityMat,
+              lat=sstObj$lat, lon=sstObj$lon, years=years)
+  
+  class(ret) <- "hadsstMats"
+  
+  return(ret)
+}
+
+
+
+
+getSSTChangeMat<- function(sstObj, years=1969:2009){
+  sstAnnualArray <- getSSTAnnualArray(sstObj, years)
+  changeMat <- sstAnnualArray[,,length(years)] - sstAnnualArray[,,1] 
+  
+  changeMat
+  
+}
+
+b2 <- subset(b, 2)
+
+bdiff <- b2 - b1
+```
